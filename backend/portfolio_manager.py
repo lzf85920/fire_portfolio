@@ -130,7 +130,15 @@ class PortfolioManager:
     def get_all_portfolios(self, active_only: bool = True):
         """Get all portfolios"""
         return self.db.get_all_portfolios(active_only)
-    
+
+    def update_portfolio(self, portfolio_id: int, **kwargs):
+        """Update portfolio details"""
+        return self.db.update_portfolio(portfolio_id, **kwargs)
+
+    def delete_portfolio(self, portfolio_id: int) -> bool:
+        """Delete portfolio (soft delete)"""
+        return self.db.delete_portfolio(portfolio_id)
+
     def adjust_holding_quantity(self, holding_id: int, new_quantity: float, new_price: float = None):
         """Adjust holding quantity (reduce position or sell)"""
         return self.db.adjust_holding_quantity(holding_id, new_quantity, new_price)

@@ -59,13 +59,25 @@ fire_portfolio/
 cd fire_portfolio
 ```
 
-### 2. Create Virtual Environment (Optional but Recommended)
+### 2. Create and Activate a Virtual Environment (Recommended)
+Use a virtual environment so your project dependencies stay isolated from system Python.
+
 ```bash
 python -m venv venv
-venv\Scripts\activate  # Windows
-# or
-source venv/bin/activate  # Mac/Linux
 ```
+
+Activate the environment:
+
+- Windows:
+  ```bash
+  venv\Scripts\activate
+  ```
+- Mac/Linux:
+  ```bash
+  source venv/bin/activate
+  ```
+
+After activation, you should see `(venv)` at the start of your shell prompt.
 
 ### 3. Install Dependencies
 ```bash
@@ -88,6 +100,114 @@ streamlit run main.py
 ```
 
 The dashboard will open at `http://localhost:8501`
+
+## Local SQLite Database Setup
+
+This project uses SQLite as the local database engine. SQLite stores data in a single file and requires no separate database server.
+
+### 1. Ensure the data folder exists
+`config.py` defines the database path as `sqlite:///data/portfolio.db` and will create `data/` automatically.
+
+### 2. Initialize the database locally
+If you are cloning the repository for the first time, run:
+
+```bash
+python init_sample_data.py
+```
+
+This creates the SQLite database and the initial sample data.
+
+### 3. Custom local DB path (optional)
+You can override the database location with an environment variable before running the app.
+
+- Windows:
+  ```bash
+  set DATABASE_URL=sqlite:///C:/full/path/to/portfolio.db
+  ```
+- Mac/Linux:
+  ```bash
+  export DATABASE_URL=sqlite:////full/path/to/portfolio.db
+  ```
+
+If `DATABASE_URL` is not set, the app uses the default `data/portfolio.db` file.
+
+### 4. Git and local database files
+The repository already excludes database files with `.gitignore` entries like `*.db`, `*.sqlite`, and `*.sqlite3`. This prevents local data from being committed to Git.
+
+### 5. Deploying the local SQLite DB without pushing it to Git
+If you want to deploy the SQLite database together with the app but do not want to store it in Git:
+
+- Keep the local database file in `data/portfolio.db` and do not add it to source control.
+- Use a separate secure deployment workflow so the DB file is provided outside Git.
+- On Streamlit Cloud, the safest pattern is to either:
+  - use a managed remote database service, or
+  - store the SQLite file in a secure private storage location and download it at runtime using a secret URL.
+
+This means the app code can stay in Git while the database stays private.
+
+## Deployment Architecture for Streamlit Cloud
+
+SQLite is a great choice for local development, but for a deployed dashboard with data persistence and security you should treat it as a local-only storage option.
+
+### Recommended architecture
+
+1. Local development:
+   - App runs with `DATABASE_URL=sqlite:///data/portfolio.db`
+   - Use `init_sample_data.py` to create the database and tables
+   - Store data locally in `data/portfolio.db`
+
+2. Streamlit Cloud / production:
+   - Use a managed database service such as PostgreSQL, MySQL, or another cloud database
+   - Keep the app code on Streamlit Cloud, but connect to the remote database using a secure connection string
+   - Store the connection string in Streamlit Secrets or environment variables, not in source code
+
+### Why this is safer
+
+- SQLite on Streamlit Cloud is not ideal because the container filesystem is ephemeral and not guaranteed persistent.
+- A managed database service provides:
+  - persistent storage
+  - access control
+  - backups
+  - encryption at rest and in transit
+
+### How to structure the app for both local and cloud
+
+- Use SQLAlchemy and `config.DATABASE_URL` as the database abstraction layer.
+- In local mode, `DATABASE_URL` points to `sqlite:///data/portfolio.db`.
+- In deployment mode, set `DATABASE_URL` to a remote database URI such as `postgresql://user:pass@host/dbname`.
+
+### Secure deployment checklist
+
+- Do not commit `data/portfolio.db` or any database files to Git.
+- Keep secrets out of source control and use Streamlit Secrets for production credentials.
+- Use a database user with only the permissions needed by the app.
+- If you need to keep SQLite for a prototype, treat it as temporary storage only and plan to migrate to a managed database later.
+
+### Streamlit access password
+This dashboard now requires a 4-digit password before the app content is shown.
+
+- Local development: set `APP_PASSWORD` as an environment variable.
+- Streamlit Cloud: add `APP_PASSWORD` to Streamlit Secrets.
+
+Only users who know the password can open the dashboard.
+
+## SQLite Schema Design
+
+This app uses a clean SQLite schema with the following logical tables:
+
+- `portfolios` — tracks portfolio metadata and activity status
+- `holdings` — stores each position with symbol, market, quantity, cost, current price, and notes
+- `price_history` — records historic price points by symbol and market
+- `performance_snapshots` — stores daily portfolio performance metrics
+- `transactions` — logs buy/sell events and realized P/L
+
+### Relationships
+
+- One portfolio can have many holdings
+- One portfolio can have many performance snapshots
+- One portfolio can have many transactions
+
+This structure supports portfolio tracking, performance history, price history, and transaction auditing.
 
 ## Usage
 

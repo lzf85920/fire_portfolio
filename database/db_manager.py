@@ -15,7 +15,7 @@ class DatabaseManager:
     def __init__(self, db_url: str = None):
         self.db_url = db_url or config.DATABASE_URL
         self.engine = create_engine(self.db_url, echo=False)
-        self.SessionLocal = sessionmaker(bind=self.engine)
+        self.SessionLocal = sessionmaker(bind=self.engine, expire_on_commit=False)
         init_database()
     
     def get_session(self) -> Session:
@@ -73,8 +73,24 @@ class DatabaseManager:
         finally:
             session.close()
     
+    def delete_portfolio(self, portfolio_id: int) -> bool:
+        """Soft delete portfolio by setting is_active to False"""
+        session = self.get_session()
+        try:
+            portfolio = session.query(PortfolioModel).filter(
+                PortfolioModel.id == portfolio_id
+            ).first()
+            if portfolio:
+                portfolio.is_active = False
+                portfolio.updated_at = datetime.utcnow()
+                session.commit()
+                return True
+            return False
+        finally:
+            session.close()
+
     # ============ Holding Operations ============
-    
+
     def add_holding(self, portfolio_id: int, symbol: str, asset_type: str,
                    quantity: float, purchase_price: float, purchase_date: datetime,
                    current_price: float, market: str = "US", currency: str = "USD", notes: str = None) -> HoldingModel:
