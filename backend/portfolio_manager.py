@@ -33,6 +33,7 @@ class PortfolioManager:
     def get_portfolio_performance(self, portfolio_id: int) -> tuple[PerformanceMetrics, List[HoldingDetail], Dict]:
         """Get complete portfolio performance data"""
         holdings = self.db.get_holdings(portfolio_id)
+        portfolio = self.db.get_portfolio(portfolio_id)
         
         holdings_details = []
         for holding in holdings:
@@ -48,7 +49,11 @@ class PortfolioManager:
             )
             holdings_details.append(detail)
         
-        metrics = PortfolioCalculator.calculate_portfolio_metrics(holdings_details)
+        total_realized_pl = portfolio.total_realized_pl if portfolio else 0.0
+        metrics = PortfolioCalculator.calculate_portfolio_metrics(
+            holdings_details,
+            total_realized_pl=total_realized_pl
+        )
         distribution = PortfolioCalculator.calculate_asset_distribution(holdings_details)
         
         return metrics, holdings_details, distribution
@@ -70,6 +75,51 @@ class PortfolioManager:
             "worst_performers": worst_performers
         }
     
+    def add_deposit(self, portfolio_id: int, amount: float, currency: str = "USD",
+                   deposit_date: datetime = None, market: str = "US", notes: str = None):
+        """Add cash deposit - doesn't affect portfolio returns
+        
+        This creates a cash holding that increases total assets but doesn't 
+        change the cost basis for return calculations.
+        """
+        try:
+            if deposit_date is None:
+                deposit_date = datetime.utcnow()
+            
+            # Determine cash symbol based on market
+            cash_symbol = "CASH_USD" if currency == "USD" else "CASH_TWD"
+            
+            # Check if matching cash holding already exists
+            existing_cash = self.db.get_holdings(portfolio_id)
+            cash_holding = next((h for h in existing_cash 
+                               if h.symbol == cash_symbol and h.currency == currency), None)
+            
+            if cash_holding:
+                # Update existing cash holding - add to quantity
+                new_quantity = cash_holding.quantity + amount
+                self.db.adjust_holding_quantity(cash_holding.id, new_quantity)
+                logger.info(f"已入金 {amount:.2f} {currency}，當前現金: {new_quantity:.2f} {currency}")
+            else:
+                # Create new cash holding
+                self.db.add_holding(
+                    portfolio_id=portfolio_id,
+                    symbol=cash_symbol,
+                    asset_type="現金",
+                    quantity=amount,
+                    purchase_price=1.0,  # Cash always has price of 1.0
+                    purchase_date=deposit_date,
+                    current_price=1.0,
+                    market=market,
+                    currency=currency,
+                    notes=f"現金入金 - {notes}" if notes else "現金入金"
+                )
+                logger.info(f"已創建現金持倉: {cash_symbol} x {amount:.2f} {currency}")
+            
+            return True
+        except Exception as e:
+            logger.error(f"入金失敗: {e}")
+            raise e
+
     def add_holding(self, portfolio_id: int, symbol: str, asset_type: str,
                    quantity: float, purchase_price: float, purchase_date: datetime,
                    market: str = "US", currency: str = "USD", notes: str = None):
@@ -187,19 +237,20 @@ class PortfolioManager:
             notes=f"減碼/賣出 {holding_obj.symbol}"
         )
         
-        # Add cash holding
-        cash_symbol = "CASH"
+        # Add cash holding - convert proceeds to standardized cash holding
+        cash_symbol = "CASH_USD" if holding_obj.currency == "USD" else "CASH_TWD"
         cash_asset_type = "現金"
-        cash_currency = "USD" if holding_obj.market == "US" else "NTD"
         
-        # Check if cash holding already exists
+        # Check if matching cash holding already exists
         cash_holdings = [h for h in self.db.get_holdings(portfolio_id) 
-                        if h.symbol == "CASH" and h.currency == cash_currency]
+                        if h.symbol == cash_symbol and h.currency == holding_obj.currency]
         
         if cash_holdings:
-            # Update existing cash
+            # Update existing cash by merging proceeds
             cash_holding = cash_holdings[0]
-            self.db.adjust_holding_quantity(cash_holding.id, cash_holding.quantity + proceeds)
+            new_cash_amount = cash_holding.quantity + proceeds
+            self.db.adjust_holding_quantity(cash_holding.id, new_cash_amount)
+            logger.info(f"已增加現金 {proceeds:.2f} {holding_obj.currency}，當前現金: {new_cash_amount:.2f} {holding_obj.currency}")
         else:
             # Create new cash holding
             self.db.add_holding(
@@ -211,11 +262,10 @@ class PortfolioManager:
                 purchase_date=datetime.utcnow(),
                 current_price=1.0,
                 market=holding_obj.market,
-                currency=cash_currency,
-                notes=f"從賣出{holding_obj.symbol}取得"
+                currency=holding_obj.currency,
+                notes=f"從出售{holding_obj.symbol}轉換而來"
             )
-        
-        logger.info(f"已轉換 {proceeds:.2f} {cash_currency} 為現金")
+            logger.info(f"已轉換 {proceeds:.2f} {holding_obj.currency} 為現金({cash_symbol})")
     
     def get_all_portfolios_analysis(self) -> Dict:
         """Get analysis for all portfolios combined"""
@@ -226,34 +276,47 @@ class PortfolioManager:
         total_metrics_tw = None
         
         for portfolio in portfolios:
-            metrics, holdings_details, _ = self.get_portfolio_performance(portfolio.id)
+            _, holdings_details, _ = self.get_portfolio_performance(portfolio.id)
             
             # Separate by currency
             holdings_us = [h for h in holdings_details if getattr(h, 'currency', 'USD') == 'USD']
             holdings_tw = [h for h in holdings_details if getattr(h, 'currency', 'NTD') == 'NTD']
+            portfolio_realized_pl = portfolio.total_realized_pl or 0.0
             
+            # Split realized P/L by currency exposure when needed
+            total_current_value = sum(h.current_value for h in holdings_us) + sum(h.current_value for h in holdings_tw)
+            us_realized_pl = portfolio_realized_pl
+            tw_realized_pl = 0.0
+            if holdings_us and holdings_tw and total_current_value > 0:
+                us_ratio = sum(h.current_value for h in holdings_us) / total_current_value
+                us_realized_pl = portfolio_realized_pl * us_ratio
+                tw_realized_pl = portfolio_realized_pl * (1 - us_ratio)
+            elif holdings_tw and not holdings_us:
+                us_realized_pl = 0.0
+                tw_realized_pl = portfolio_realized_pl
+
             if holdings_us:
+                us_metrics = PortfolioCalculator.calculate_portfolio_metrics(holdings_us, total_realized_pl=us_realized_pl)
                 if total_metrics_us is None:
-                    total_metrics_us = PortfolioCalculator.calculate_portfolio_metrics(holdings_us)
+                    total_metrics_us = us_metrics
                 else:
-                    # Combine metrics
-                    us_metrics = PortfolioCalculator.calculate_portfolio_metrics(holdings_us)
                     total_metrics_us.total_value += us_metrics.total_value
                     total_metrics_us.total_cost += us_metrics.total_cost
+                    total_metrics_us.total_realized_pl += us_metrics.total_realized_pl
                     total_metrics_us.total_pl += us_metrics.total_pl
                     total_metrics_us.total_pl_percentage = (total_metrics_us.total_pl / total_metrics_us.total_cost * 100) if total_metrics_us.total_cost > 0 else 0
-            
+
             if holdings_tw:
+                tw_metrics = PortfolioCalculator.calculate_portfolio_metrics(holdings_tw, total_realized_pl=tw_realized_pl)
                 if total_metrics_tw is None:
-                    total_metrics_tw = PortfolioCalculator.calculate_portfolio_metrics(holdings_tw)
+                    total_metrics_tw = tw_metrics
                 else:
-                    # Combine metrics
-                    tw_metrics = PortfolioCalculator.calculate_portfolio_metrics(holdings_tw)
                     total_metrics_tw.total_value += tw_metrics.total_value
                     total_metrics_tw.total_cost += tw_metrics.total_cost
+                    total_metrics_tw.total_realized_pl += tw_metrics.total_realized_pl
                     total_metrics_tw.total_pl += tw_metrics.total_pl
                     total_metrics_tw.total_pl_percentage = (total_metrics_tw.total_pl / total_metrics_tw.total_cost * 100) if total_metrics_tw.total_cost > 0 else 0
-            
+
             all_holdings_details.extend(holdings_details)
         
         return {

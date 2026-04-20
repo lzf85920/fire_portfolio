@@ -36,7 +36,7 @@ def create_sample_data():
         # US Tech Stocks
         {
             "symbol": "AAPL",
-            "asset_type": "股票 - 美股",
+            "asset_type": "美股",
             "quantity": 10,
             "purchase_price": 150.0,
             "purchase_date": datetime(2024, 1, 15),
@@ -44,7 +44,7 @@ def create_sample_data():
         },
         {
             "symbol": "MSFT",
-            "asset_type": "股票 - 美股",
+            "asset_type": "美股",
             "quantity": 5,
             "purchase_price": 350.0,
             "purchase_date": datetime(2024, 2, 1),
@@ -52,7 +52,7 @@ def create_sample_data():
         },
         {
             "symbol": "NVDA",
-            "asset_type": "股票 - 美股",
+            "asset_type": "美股",
             "quantity": 2,
             "purchase_price": 700.0,
             "purchase_date": datetime(2024, 1, 20),
@@ -61,7 +61,7 @@ def create_sample_data():
         # US ETFs
         {
             "symbol": "VOO",
-            "asset_type": "ETF - 美股",
+            "asset_type": "美股",
             "quantity": 20,
             "purchase_price": 410.0,
             "purchase_date": datetime(2023, 12, 1),
@@ -69,7 +69,7 @@ def create_sample_data():
         },
         {
             "symbol": "QQQ",
-            "asset_type": "ETF - 美股",
+            "asset_type": "美股",
             "quantity": 15,
             "purchase_price": 365.0,
             "purchase_date": datetime(2024, 1, 5),
@@ -78,7 +78,7 @@ def create_sample_data():
         # Taiwan Stocks
         {
             "symbol": "2330.TW",
-            "asset_type": "股票 - 台股",
+            "asset_type": "台股",
             "quantity": 100,
             "purchase_price": 600.0,
             "purchase_date": datetime(2024, 2, 15),
@@ -86,7 +86,7 @@ def create_sample_data():
         },
         {
             "symbol": "3008.TW",
-            "asset_type": "股票 - 台股",
+            "asset_type": "台股",
             "quantity": 100,
             "purchase_price": 300.0,
             "purchase_date": datetime(2024, 1, 10),
@@ -95,7 +95,7 @@ def create_sample_data():
         # Taiwan ETF
         {
             "symbol": "0050.TW",
-            "asset_type": "ETF - 台股",
+            "asset_type": "台股",
             "quantity": 50,
             "purchase_price": 180.0,
             "purchase_date": datetime(2023, 11, 1),

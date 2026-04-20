@@ -118,7 +118,7 @@ class MetricsRenderer:
             with col4:
                 st.metric(
                     "台股已實現損益 (NTD)",
-                    format_currency(tw_realized_pl_delta, "NTD"),
+                    format_currency(tw_metrics.total_realized_pl, "NTD"),
                     delta=format_currency(tw_realized_pl_delta, "NTD") if tw_realized_pl_delta != 0 else None
                 )
 

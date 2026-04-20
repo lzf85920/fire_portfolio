@@ -43,15 +43,17 @@ class PortfolioCalculator:
         )
     
     @staticmethod
-    def calculate_portfolio_metrics(holdings_details: List[HoldingDetail]) -> PerformanceMetrics:
+    def calculate_portfolio_metrics(
+        holdings_details: List[HoldingDetail],
+        total_realized_pl: float = 0.0
+    ) -> PerformanceMetrics:
         """Calculate overall portfolio metrics"""
         
         total_cost = sum(h.cost_basis for h in holdings_details)
         total_value = sum(h.current_value for h in holdings_details)
         total_unrealized_pl = sum(h.unrealized_pl for h in holdings_details)
         
-        # For now, realized PL is 0 (could be calculated if we track sold positions)
-        total_realized_pl = 0
+        total_realized_pl = total_realized_pl or 0.0
         total_pl = total_unrealized_pl + total_realized_pl
         
         return_percentage = (total_pl / total_cost * 100) if total_cost != 0 else 0

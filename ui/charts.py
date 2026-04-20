@@ -85,8 +85,8 @@ class ChartsRenderer:
                     use_container_width=True,
                     hide_index=True,
                     column_config={
-                        "代碼": st.column_config.TextColumn("代碼", width="medium"),
-                        "市值": st.column_config.TextColumn("市值", width="medium"),
+                        "代碼": st.column_config.TextColumn("代碼", width="small"),
+                        "市值": st.column_config.TextColumn("市值", width="small"),
                         "占比": st.column_config.TextColumn("占比", width="small")
                     }
                 )

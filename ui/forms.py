@@ -22,48 +22,70 @@ class FormsRenderer:
             st.subheader("➕ 添加新持倉")
 
             with st.form("add_holding_form"):
-                # Market selection
-                market = st.radio("選擇市場", ["🇺🇸 美股 (USD)", "🇹🇼 台股 (NTD)"])
-                market_code = "US" if "美股" in market else "TW"
-                currency = "USD" if market_code == "US" else "NTD"
+                # Transaction type selection
+                transaction_type = st.radio("交易類型", ["📊 購買持倉", "💰 現金入金"], horizontal=True)
+                is_deposit = "現金入金" in transaction_type
+
+                # Market selection (only for positions)
+                if not is_deposit:
+                    market = st.radio("選擇市場", ["🇺🇸 美股 (USD)", "🇹🇼 台股 (NTD)"])
+                    market_code = "US" if "美股" in market else "TW"
+                    currency = "USD" if market_code == "US" else "NTD"
+                else:
+                    # For deposits, always US by default (user can choose)
+                    market = st.radio("選擇幣種", ["🇺🇸 USD", "🇹🇼 NTD"])
+                    market_code = "US" if "USD" in market else "TW"
+                    currency = "USD" if market_code == "US" else "NTD"
 
                 # Asset type and symbol
                 col1, col2 = st.columns(2)
 
                 with col1:
                     import config
-                    asset_type = st.selectbox("資產類別", config.ASSET_CLASSES, key="asset_type")
+                    if is_deposit:
+                        asset_type = "現金"
+                        st.text_input("資產類別", value="現金", disabled=True, key="asset_type_display")
+                    else:
+                        asset_type = st.selectbox("資產類別", config.ASSET_CLASSES, key="asset_type")
 
                 with col2:
-                    if asset_type == "現金":
+                    if is_deposit:
                         symbol = "CASH"
                         st.text_input("代碼", value=symbol, disabled=True, key="symbol")
                     else:
-                        symbol = st.text_input("代碼 (例如: AAPL, 2330.TW)", key="symbol")
+                        symbol = st.text_input("代碼 (例如: AAPL, 2330)", key="symbol")
 
                 # Quantity and purchase price
                 col3, col4 = st.columns(2)
 
                 with col3:
-                    quantity = st.number_input("數量/金額", min_value=0.0, step=0.01, key="quantity")
+                    if is_deposit:
+                        quantity = st.number_input("入金金額", min_value=0.0, step=100.0, key="quantity")
+                    else:
+                        quantity = st.number_input("持倉數量", min_value=0.0, step=0.01, key="quantity")
 
                 with col4:
-                    if asset_type == "現金":
+                    if is_deposit:
                         purchase_price = 1.0
-                        st.text_input("購買價格", value="1.00", disabled=True, key="purchase_price")
+                        st.text_input("金額倍數", value="1.00", disabled=True, key="purchase_price")
                     else:
                         purchase_price = st.number_input("購買價格", min_value=0.0, step=0.01, key="purchase_price")
 
                 # Purchase date
-                purchase_date = st.date_input("購買日期", key="purchase_date")
+                if is_deposit:
+                    purchase_date = st.date_input("入金日期", key="purchase_date")
+                    notes = st.text_area("入金備註（可選）", placeholder="例如：薪資轉入、獲利提取", key="notes")
+                else:
+                    purchase_date = st.date_input("購買日期", key="purchase_date")
+                    notes = st.text_area("備註（可選）", key="notes")
 
-                # Notes
-                notes = st.text_area("備註（可選）", key="notes")
-
-                submitted = st.form_submit_button("添加持倉", use_container_width=True)
+                submitted = st.form_submit_button(
+                    "確認入金" if is_deposit else "確認購買", 
+                    use_container_width=True
+                )
 
                 if submitted:
-                    if not symbol or (not purchase_price and asset_type != "現金") or not quantity:
+                    if not symbol or (not purchase_price and not is_deposit) or not quantity:
                         st.error("請填寫所有必填字段")
                     else:
                         # 設定確認資料
@@ -75,51 +97,73 @@ class FormsRenderer:
                             'purchase_date': purchase_date,
                             'market': market_code,
                             'currency': currency,
-                            'notes': notes
+                            'notes': notes,
+                            'is_deposit': is_deposit
                         }
                         st.rerun()
 
         # 確認視窗
         if 'confirm_add' in st.session_state and st.session_state.confirm_add is not None:
             data = st.session_state.confirm_add
-            st.subheader("🔍 確認添加持倉")
+            is_deposit = data.get('is_deposit', False)
+            
+            st.subheader("💰 確認現金入金" if is_deposit else "🔍 確認購買持倉")
 
             # 顯示確認資訊
             col1, col2 = st.columns(2)
             with col1:
-                st.write(f"**代碼:** {data['symbol']}")
-                st.write(f"**資產類別:** {data['asset_type']}")
-                st.write(f"**數量:** {data['quantity']}")
+                st.write(f"**幣種:** {data['currency']}")
+                if not is_deposit:
+                    st.write(f"**代碼:** {data['symbol']}")
+                    st.write(f"**資產類別:** {data['asset_type']}")
+                st.write(f"**數量/金額:** {data['quantity']}")
             with col2:
-                st.write(f"**購買價格:** {format_currency(data['purchase_price'], data['currency'])}")
-                st.write(f"**購買日期:** {data['purchase_date']}")
-                st.write(f"**市場:** {data['market']}")
+                if not is_deposit:
+                    st.write(f"**購買價格:** {format_currency(data['purchase_price'], data['currency'])}")
+                    st.write(f"**市場:** {data['market']}")
+                st.write(f"**交易日期:** {data['purchase_date']}")
+                if is_deposit:
+                    st.info("✅ 現金入金不會影響投資回報率計算")
 
             if data['notes']:
                 st.write(f"**備註:** {data['notes']}")
 
             col1, col2 = st.columns(2)
             with col1:
-                if st.button("✅ 確定添加", use_container_width=True):
+                button_text = "✅ 確認入金" if is_deposit else "✅ 確認購買"
+                if st.button(button_text, use_container_width=True):
                     try:
-                        with st.spinner("正在添加持倉..."):
-                            self.pm.add_holding(
-                                portfolio_id=st.session_state.portfolio_id,
-                                symbol=data['symbol'],
-                                asset_type=data['asset_type'],
-                                quantity=data['quantity'],
-                                purchase_price=data['purchase_price'],
-                                purchase_date=pd.Timestamp(data['purchase_date']).to_pydatetime(),
-                                market=data['market'],
-                                currency=data['currency'],
-                                notes=data['notes']
-                            )
-                            st.success(f"{data['symbol']} 成功添加！")
+                        with st.spinner("正在處理..." if is_deposit else "正在添加持倉..."):
+                            if is_deposit:
+                                # Handle deposit - adds to cash without affecting returns
+                                self.pm.add_deposit(
+                                    portfolio_id=st.session_state.portfolio_id,
+                                    amount=data['quantity'],
+                                    currency=data['currency'],
+                                    deposit_date=pd.Timestamp(data['purchase_date']).to_pydatetime(),
+                                    market=data['market'],
+                                    notes=data['notes']
+                                )
+                                st.success(f"成功入金 {data['quantity']:.2f} {data['currency']}！")
+                            else:
+                                # Handle regular holding purchase
+                                self.pm.add_holding(
+                                    portfolio_id=st.session_state.portfolio_id,
+                                    symbol=data['symbol'],
+                                    asset_type=data['asset_type'],
+                                    quantity=data['quantity'],
+                                    purchase_price=data['purchase_price'],
+                                    purchase_date=pd.Timestamp(data['purchase_date']).to_pydatetime(),
+                                    market=data['market'],
+                                    currency=data['currency'],
+                                    notes=data['notes']
+                                )
+                                st.success(f"{data['symbol']} 成功購買！")
                             st.session_state.show_add_form = False
                             del st.session_state.confirm_add
                             st.rerun()
                     except Exception as e:
-                        st.error(f"添加持倉時出錯: {e}")
+                        st.error(f"處理失敗: {e}")
 
             with col2:
                 if st.button("❌ 取消", use_container_width=True):
@@ -136,10 +180,9 @@ class FormsRenderer:
 
         # Prepare dataframe
         data = []
-        for i, holding in enumerate(holdings):
+        for holding in holdings:
             currency = getattr(holding, 'currency', 'USD')
             data.append({
-                "序號": i + 1,
                 "代碼": holding.symbol,
                 "資產類別": holding.asset_type,
                 "貨幣": currency,
@@ -155,6 +198,9 @@ class FormsRenderer:
         import pandas as pd
         df = pd.DataFrame(data)
 
+        # Sort by asset type first, then by symbol
+        df_sorted = df.sort_values(by=["資產類別", "代碼"], ascending=[True, True])
+
         # Style dataframe
         def color_return(val):
             try:
@@ -168,7 +214,7 @@ class FormsRenderer:
             except:
                 return ""
 
-        styled_df = df.style.map(color_return, subset=["回報%"])
+        styled_df = df_sorted.style.map(color_return, subset=["回報%"])
 
         st.dataframe(styled_df, use_container_width=True, hide_index=True)
 

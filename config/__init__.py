@@ -12,10 +12,8 @@ DATABASE_URL = f"sqlite:///{DB_PATH}"
 
 # Supported asset classes
 ASSET_CLASSES = [
-    "股票 - 美股",
-    "股票 - 台股",
-    "ETF - 美股",
-    "ETF - 台股",
+    "美股",
+    "台股",
     "現金",
     "其他"
 ]
