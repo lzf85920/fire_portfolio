@@ -20,6 +20,7 @@ class PortfolioModel(Base):
     is_active = Column(Boolean, default=True)
     
     holdings = relationship("HoldingModel", back_populates="portfolio", cascade="all, delete-orphan")
+    options = relationship("OptionModel", back_populates="portfolio", cascade="all, delete-orphan")
 
 class HoldingModel(Base):
     """Holdings (positions) table"""
@@ -51,6 +52,29 @@ class PriceHistoryModel(Base):
     date = Column(DateTime, nullable=False, index=True)
     market = Column(String(10), nullable=False)  # US or TW
     created_at = Column(DateTime, default=datetime.utcnow)
+
+class OptionModel(Base):
+    """Option contracts table"""
+    __tablename__ = "options"
+    
+    id = Column(Integer, primary_key=True)
+    portfolio_id = Column(Integer, ForeignKey("portfolios.id"), nullable=False)
+    symbol = Column(String(20), nullable=False)  # Underlying stock (e.g., TSLA)
+    option_type = Column(String(10), nullable=False)  # CALL or PUT
+    strike = Column(Float, nullable=False)  # Strike price
+    expiration = Column(DateTime, nullable=False, index=True)  # Expiration date
+    quantity = Column(Integer, nullable=False)  # Number of contracts (1 contract = 100 shares)
+    premium = Column(Float, nullable=False)  # Price paid per share
+    purchase_date = Column(DateTime, nullable=False)
+    current_price = Column(Float, nullable=False)  # Current option price per share
+    price_updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    status = Column(String(20), default="OPEN")  # OPEN, CLOSED, EXPIRED
+    notes = Column(String(500))
+    market = Column(String(10), default="US")  # US or TW
+    currency = Column(String(5), default="USD")  # USD or NTD
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    portfolio = relationship("PortfolioModel", back_populates="options")
 
 class PerformanceSnapshotModel(Base):
     """Daily portfolio performance snapshot"""

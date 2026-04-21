@@ -6,7 +6,7 @@ from typing import List, Optional
 import config
 from database.schema import (
     Base, PortfolioModel, HoldingModel, PriceHistoryModel,
-    PerformanceSnapshotModel, TransactionModel, init_database
+    PerformanceSnapshotModel, TransactionModel, OptionModel, init_database
 )
 
 class DatabaseManager:
@@ -267,6 +267,95 @@ class DatabaseManager:
             ).order_by(desc(TransactionModel.transaction_date)).limit(limit).all()
         finally:
             session.close()
+    
+    # ============ Option Operations ============
+    
+    def add_option(self, portfolio_id: int, symbol: str, option_type: str,
+                  strike: float, expiration: datetime, quantity: int,
+                  premium: float, current_price: float, market: str = "US",
+                  currency: str = "USD", notes: str = None) -> OptionModel:
+        """Add a new option contract to portfolio"""
+        session = self.get_session()
+        try:
+            option = OptionModel(
+                portfolio_id=portfolio_id,
+                symbol=symbol,
+                option_type=option_type.upper(),  # CALL or PUT
+                strike=strike,
+                expiration=expiration,
+                quantity=quantity,
+                premium=premium,
+                purchase_date=datetime.utcnow(),
+                current_price=current_price,
+                market=market,
+                currency=currency,
+                notes=notes
+            )
+            session.add(option)
+            session.commit()
+            return option
+        finally:
+            session.close()
+    
+    def get_options(self, portfolio_id: int) -> List[OptionModel]:
+        """Get all option contracts for a portfolio"""
+        session = self.get_session()
+        try:
+            return session.query(OptionModel).filter(
+                OptionModel.portfolio_id == portfolio_id
+            ).all()
+        finally:
+            session.close()
+    
+    def get_option(self, option_id: int) -> Optional[OptionModel]:
+        """Get a specific option contract"""
+        session = self.get_session()
+        try:
+            return session.query(OptionModel).filter(
+                OptionModel.id == option_id
+            ).first()
+        finally:
+            session.close()
+    
+    def update_option(self, option_id: int, **kwargs) -> Optional[OptionModel]:
+        """Update option contract"""
+        session = self.get_session()
+        try:
+            option = session.query(OptionModel).filter(
+                OptionModel.id == option_id
+            ).first()
+            if option:
+                for key, value in kwargs.items():
+                    if hasattr(option, key):
+                        setattr(option, key, value)
+                option.price_updated_at = datetime.utcnow()
+                session.commit()
+            return option
+        finally:
+            session.close()
+    
+    def delete_option(self, option_id: int) -> bool:
+        """Delete option contract"""
+        session = self.get_session()
+        try:
+            option = session.query(OptionModel).filter(
+                OptionModel.id == option_id
+            ).first()
+            if option:
+                session.delete(option)
+                session.commit()
+                return True
+            return False
+        finally:
+            session.close()
+    
+    def close_option(self, option_id: int, close_price: float) -> Optional[OptionModel]:
+        """Mark option as closed and record the close price"""
+        return self.update_option(option_id, status="CLOSED", current_price=close_price)
+    
+    def expire_option(self, option_id: int) -> Optional[OptionModel]:
+        """Mark option as expired"""
+        return self.update_option(option_id, status="EXPIRED", current_price=0.0)
 
 # Global database manager instance
 _db_manager = None

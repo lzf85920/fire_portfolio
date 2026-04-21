@@ -11,7 +11,13 @@ class AssetType(Enum):
     ETF_US = "ETF - US"
     ETF_TW = "ETF - Taiwan"
     CASH = "Cash"
+    OPTION = "Option"
     OTHER = "Other"
+
+class OptionType(Enum):
+    """Option type enumeration"""
+    CALL = "CALL"
+    PUT = "PUT"
 
 @dataclass
 class Portfolio:
@@ -49,6 +55,25 @@ class PriceHistory:
     market: str  # "US" or "TW"
 
 @dataclass
+class OptionHolding:
+    """Individual option contract holding"""
+    id: int
+    portfolio_id: int
+    symbol: str  # Underlying stock symbol (e.g., TSLA)
+    option_type: str  # CALL or PUT
+    strike: float  # Strike price
+    expiration: datetime  # Expiration date
+    quantity: int  # Number of contracts (1 contract = 100 shares)
+    premium: float  # Price paid per share (so actual cost = quantity * 100 * premium)
+    purchase_date: datetime
+    current_price: float  # Current option price per share
+    price_updated_at: datetime
+    status: str = "OPEN"  # OPEN, CLOSED, EXPIRED
+    notes: Optional[str] = None
+    market: str = "US"  # "US" or "TW"
+    currency: str = "USD"
+
+@dataclass
 class PerformanceMetrics:
     """Portfolio performance metrics"""
     total_value: float
@@ -74,4 +99,23 @@ class HoldingDetail:
     unrealized_return_pct: float
     market: str
     currency: str  # "USD" or "NTD"
+    last_updated: datetime
+
+@dataclass
+class OptionDetail:
+    """Option contract with calculated performance data"""
+    symbol: str  # Underlying stock
+    option_type: str  # CALL or PUT
+    strike: float
+    expiration: datetime
+    quantity: int  # Number of contracts
+    premium: float  # Price paid per share
+    current_price: float  # Current option price per share
+    cost_basis: float  # quantity * 100 * premium
+    current_value: float  # quantity * 100 * current_price
+    unrealized_pl: float  # current_value - cost_basis
+    unrealized_return_pct: float  # (unrealized_pl / cost_basis) * 100 if cost_basis > 0
+    status: str  # OPEN, CLOSED, EXPIRED
+    market: str
+    currency: str
     last_updated: datetime

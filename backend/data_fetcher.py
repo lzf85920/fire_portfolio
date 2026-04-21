@@ -108,6 +108,85 @@ class DataFetcher:
         except Exception as e:
             logger.error(f"取得指數 {index_symbol} 的斷點斷市歷史數據時出錯: {e}")
             return pd.DataFrame()
+    
+    @staticmethod
+    def get_option_chain(symbol: str) -> pd.DataFrame:
+        """Get available option expirations for a stock"""
+        try:
+            ticker = yf.Ticker(symbol)
+            return ticker.options  # Returns list of expirations like ['2026-03-20', '2026-04-17']
+        except Exception as e:
+            logger.error(f"取得 {symbol} 的選擇權鏈時出錯: {e}")
+            return []
+    
+    @staticmethod
+    def get_option_data(symbol: str, expiration: str) -> Dict:
+        """Get option data for a specific symbol and expiration
+        
+        Args:
+            symbol: Stock ticker (e.g., 'TSLA')
+            expiration: Expiration date as string (e.g., '2026-03-20')
+        
+        Returns:
+            Dict with 'calls' and 'puts' DataFrames containing option data
+        """
+        try:
+            ticker = yf.Ticker(symbol)
+            # Get option chain for specific expiration
+            option_chain = ticker.option_chain(expiration)
+            
+            return {
+                'calls': option_chain.calls,
+                'puts': option_chain.puts,
+                'expiration': expiration
+            }
+        except Exception as e:
+            logger.error(f"取得 {symbol} 在 {expiration} 的選擇權數據時出錯: {e}")
+            return {'calls': pd.DataFrame(), 'puts': pd.DataFrame(), 'expiration': expiration}
+    
+    @staticmethod
+    def get_option_price(symbol: str, expiration: str, strike: float, option_type: str) -> Optional[float]:
+        """Get current price for a specific option contract
+        
+        Args:
+            symbol: Stock ticker (e.g., 'TSLA')
+            expiration: Expiration date as string (e.g., '2026-03-20')
+            strike: Strike price
+            option_type: 'CALL' or 'PUT'
+        
+        Returns:
+            Current option price (mid price) or None if not found
+        """
+        try:
+            option_data = DataFetcher.get_option_data(symbol, expiration)
+            option_type_upper = option_type.upper()
+            
+            if option_type_upper == 'CALL':
+                df = option_data['calls']
+            elif option_type_upper == 'PUT':
+                df = option_data['puts']
+            else:
+                return None
+            
+            # Find the row with matching strike
+            matching = df[df['strike'] == strike]
+            if matching.empty:
+                logger.warning(f"找不到 {symbol} {option_type} {strike} 在 {expiration} 的選擇權")
+                return None
+            
+            # Return mid price (average of bid and ask)
+            row = matching.iloc[0]
+            if pd.isna(row['bid']) or pd.isna(row['ask']) or row['bid'] == 0:
+                # Use last price if bid/ask not available
+                if 'lastPrice' in row.index and not pd.isna(row['lastPrice']):
+                    return round(row['lastPrice'], 2)
+                return None
+            
+            mid_price = (row['bid'] + row['ask']) / 2
+            return round(mid_price, 2)
+        except Exception as e:
+            logger.error(f"取得 {symbol} {option_type} {strike} 在 {expiration} 的價格時出錯: {e}")
+            return None
 
 # Try to import twstock for Taiwan stocks (optional)
 try:
