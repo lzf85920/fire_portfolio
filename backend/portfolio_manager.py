@@ -154,18 +154,34 @@ class PortfolioManager:
     def add_holding(self, portfolio_id: int, symbol: str, asset_type: str,
                    quantity: float, purchase_price: float, purchase_date: datetime,
                    market: str = "US", currency: str = "USD", notes: str = None):
-        """Add a new holding"""
+        """Add a new holding and deduct cost from cash"""
         try:
-            # Handle cash deposit
+            # Handle cash deposit - this should not deduct from cash
             if symbol.upper() == "CASH" or asset_type == "現金":
                 current_price = 1.0  # Cash is always 1.0
                 currency = "USD" if market == "US" else "NTD"
-            else:
-                # Get current price
-                current_price = DataFetcher.get_price(symbol, market)
-                if not current_price:
-                    logger.error(f"無法取得 {symbol} 的價格")
-                    raise ValueError(f"無法取得 {symbol} 的價格")
+                # For cash deposits, don't deduct from cash
+                holding = self.db.add_holding(
+                    portfolio_id=portfolio_id,
+                    symbol=symbol,
+                    asset_type=asset_type if asset_type != "現金" else "現金",
+                    quantity=quantity,
+                    purchase_price=purchase_price,
+                    purchase_date=purchase_date,
+                    current_price=current_price,
+                    market=market,
+                    currency=currency,
+                    notes=notes
+                )
+                logger.info(f"已添加現金持倉: {symbol} x {quantity:.2f} ({currency})")
+                return holding
+            
+            # For non-cash holdings, deduct cost from cash
+            # Get current price
+            current_price = DataFetcher.get_price(symbol, market)
+            if not current_price:
+                logger.error(f"無法取得 {symbol} 的價格")
+                raise ValueError(f"無法取得 {symbol} 的價格")
             
             # Determine currency based on market if not provided
             if currency == "USD" and market == "TW":
@@ -173,10 +189,57 @@ class PortfolioManager:
             elif currency == "NTD" and market == "US":
                 currency = "USD"
             
+            # Calculate total cost
+            total_cost = quantity * purchase_price
+            
+            # Deduct from cash
+            cash_symbol = "CASH_USD" if currency == "USD" else "CASH_TWD"
+            cash_holdings = self.db.get_holdings(portfolio_id)
+            cash_holding = next((h for h in cash_holdings 
+                               if h.symbol == cash_symbol and h.currency == currency), None)
+            
+            if cash_holding:
+                # Deduct cost from existing cash (can go negative)
+                new_cash_amount = cash_holding.quantity - total_cost
+                self.db.adjust_holding_quantity(cash_holding.id, new_cash_amount)
+                logger.info(f"已從現金扣除 {total_cost:.2f} {currency}，剩餘現金: {new_cash_amount:.2f} {currency}")
+                
+                # If cash goes negative, adjust portfolio's total cost basis
+                if new_cash_amount < 0:
+                    portfolio = self.db.get_portfolio(portfolio_id)
+                    if portfolio:
+                        # Increase total realized P&L to account for negative cash
+                        # This effectively reduces the portfolio's cost basis
+                        adjustment = abs(new_cash_amount)
+                        new_total_realized_pl = (portfolio.total_realized_pl or 0.0) + adjustment
+                        self.db.update_portfolio(portfolio_id, total_realized_pl=new_total_realized_pl)
+                        logger.info(f"現金為負數，已調整投資組合總成本: +{adjustment:.2f}")
+            else:
+                # No cash holding exists, create negative cash
+                self.db.add_holding(
+                    portfolio_id=portfolio_id,
+                    symbol=cash_symbol,
+                    asset_type="現金",
+                    quantity=-total_cost,
+                    purchase_price=1.0,
+                    purchase_date=purchase_date,
+                    current_price=1.0,
+                    market=market,
+                    currency=currency,
+                    notes=f"購買{symbol}產生的負現金"
+                )
+                # Adjust portfolio cost basis for negative cash
+                portfolio = self.db.get_portfolio(portfolio_id)
+                if portfolio:
+                    new_total_realized_pl = (portfolio.total_realized_pl or 0.0) + total_cost
+                    self.db.update_portfolio(portfolio_id, total_realized_pl=new_total_realized_pl)
+                    logger.info(f"無現金餘額，已創建負現金並調整總成本: +{total_cost:.2f}")
+            
+            # Add the holding
             holding = self.db.add_holding(
                 portfolio_id=portfolio_id,
                 symbol=symbol,
-                asset_type=asset_type if asset_type != "現金" else "現金",
+                asset_type=asset_type,
                 quantity=quantity,
                 purchase_price=purchase_price,
                 purchase_date=purchase_date,
@@ -186,7 +249,7 @@ class PortfolioManager:
                 notes=notes
             )
             
-            logger.info(f"已添加持倉: {symbol} x {quantity} ({currency})")
+            logger.info(f"已添加持倉並從現金扣除成本: {symbol} x {quantity} ({currency})，成本: {total_cost:.2f}")
             return holding
         except Exception as e:
             logger.error(f"添加持倉時出錯: {e}")
@@ -224,8 +287,15 @@ class PortfolioManager:
         """Adjust holding quantity (reduce position or sell)"""
         return self.db.adjust_holding_quantity(holding_id, new_quantity, new_price)
     
-    def sell_position(self, portfolio_id: int, holding_id: int, sell_quantity: float):
-        """Sell a position and convert proceeds to cash"""
+    def sell_position(self, portfolio_id: int, holding_id: int, sell_quantity: float, sell_price: Optional[float] = None):
+        """Sell a position and convert proceeds to cash
+        
+        Args:
+            portfolio_id: Portfolio ID
+            holding_id: Holding ID
+            sell_quantity: Quantity to sell
+            sell_price: Optional custom sell price (uses current_price if not provided)
+        """
         holding = self.db.get_holdings(portfolio_id)
         holding_obj = next((h for h in holding if h.id == holding_id), None)
         
@@ -235,8 +305,11 @@ class PortfolioManager:
         if sell_quantity > holding_obj.quantity:
             raise ValueError("賣出數量超過持倉數量")
         
+        # Use provided sell_price or fall back to current_price
+        actual_sell_price = sell_price if sell_price is not None else holding_obj.current_price
+        
         # Calculate proceeds and realized P&L
-        proceeds = sell_quantity * holding_obj.current_price
+        proceeds = sell_quantity * actual_sell_price
         cost_sold = sell_quantity * holding_obj.purchase_price
         realized_pl = proceeds - cost_sold
         
@@ -262,7 +335,7 @@ class PortfolioManager:
             symbol=holding_obj.symbol,
             transaction_type="SELL",
             quantity=sell_quantity,
-            price=holding_obj.current_price,
+            price=actual_sell_price,
             transaction_date=datetime.utcnow(),
             realized_pl=realized_pl,
             notes=f"減碼/賣出 {holding_obj.symbol}"
@@ -304,7 +377,7 @@ class PortfolioManager:
                   strike: float, expiration: datetime, quantity: int,
                   premium: float, market: str = "US", currency: str = "USD",
                   notes: str = None):
-        """Add a new option contract to portfolio
+        """Add a new option contract to portfolio and deduct cost from cash
         
         Args:
             portfolio_id: Portfolio ID
@@ -330,6 +403,50 @@ class PortfolioManager:
                 logger.warning(f"無法取得選擇權價格，使用輸入的期權費率: {premium}")
                 current_price = premium
             
+            # Calculate total cost for option (quantity contracts * 100 shares * premium per share)
+            total_cost = quantity * 100 * premium
+            
+            # Deduct from cash
+            cash_symbol = "CASH_USD" if currency == "USD" else "CASH_TWD"
+            cash_holdings = self.db.get_holdings(portfolio_id)
+            cash_holding = next((h for h in cash_holdings 
+                               if h.symbol == cash_symbol and h.currency == currency), None)
+            
+            if cash_holding:
+                # Deduct cost from existing cash (can go negative)
+                new_cash_amount = cash_holding.quantity - total_cost
+                self.db.adjust_holding_quantity(cash_holding.id, new_cash_amount)
+                logger.info(f"已從現金扣除期權成本 {total_cost:.2f} {currency}，剩餘現金: {new_cash_amount:.2f} {currency}")
+                
+                # If cash goes negative, adjust portfolio's total cost basis
+                if new_cash_amount < 0:
+                    portfolio = self.db.get_portfolio(portfolio_id)
+                    if portfolio:
+                        adjustment = abs(new_cash_amount)
+                        new_total_realized_pl = (portfolio.total_realized_pl or 0.0) + adjustment
+                        self.db.update_portfolio(portfolio_id, total_realized_pl=new_total_realized_pl)
+                        logger.info(f"現金為負數，已調整投資組合總成本: +{adjustment:.2f}")
+            else:
+                # No cash holding exists, create negative cash
+                self.db.add_holding(
+                    portfolio_id=portfolio_id,
+                    symbol=cash_symbol,
+                    asset_type="現金",
+                    quantity=-total_cost,
+                    purchase_price=1.0,
+                    purchase_date=datetime.utcnow(),
+                    current_price=1.0,
+                    market=market,
+                    currency=currency,
+                    notes=f"購買{symbol}期權產生的負現金"
+                )
+                # Adjust portfolio cost basis for negative cash
+                portfolio = self.db.get_portfolio(portfolio_id)
+                if portfolio:
+                    new_total_realized_pl = (portfolio.total_realized_pl or 0.0) + total_cost
+                    self.db.update_portfolio(portfolio_id, total_realized_pl=new_total_realized_pl)
+                    logger.info(f"無現金餘額，已創建負現金並調整總成本: +{total_cost:.2f}")
+            
             option = self.db.add_option(
                 portfolio_id=portfolio_id,
                 symbol=symbol,
@@ -344,7 +461,7 @@ class PortfolioManager:
                 notes=notes
             )
             
-            logger.info(f"已添加選擇權: {symbol} {option_type} {strike} @ {expiration.strftime('%Y-%m-%d')}, 數量: {quantity}")
+            logger.info(f"已添加選擇權並從現金扣除成本: {symbol} {option_type} {strike} @ {expiration.strftime('%Y-%m-%d')}, 數量: {quantity}，成本: {total_cost:.2f}")
             return option
         except Exception as e:
             logger.error(f"添加選擇權時出錯: {e}")
@@ -394,12 +511,49 @@ class PortfolioManager:
         )
     
     def close_option(self, option_id: int, close_price: float) -> Optional[OptionDetail]:
-        """Close an option contract"""
+        """Close an option contract and convert proceeds to cash"""
         try:
-            option = self.db.close_option(option_id, close_price)
-            if option:
-                logger.info(f"已平倉選擇權: {option.symbol} {option.option_type} {option.strike}")
-                return self._calculate_option_performance(option)
+            # Get option before closing
+            option = self.db.get_options_by_ids([option_id])
+            if not option:
+                raise ValueError("選擇權不存在")
+            option = option[0]
+            
+            # Calculate proceeds from closing the option
+            proceeds = option.quantity * 100 * close_price
+            
+            # Close the option
+            closed_option = self.db.close_option(option_id, close_price)
+            if closed_option:
+                # Convert proceeds to cash
+                cash_symbol = "CASH_USD" if closed_option.currency == "USD" else "CASH_TWD"
+                cash_holdings = self.db.get_holdings(closed_option.portfolio_id)
+                cash_holding = next((h for h in cash_holdings 
+                                   if h.symbol == cash_symbol and h.currency == closed_option.currency), None)
+                
+                if cash_holding:
+                    # Add proceeds to existing cash
+                    new_cash_amount = cash_holding.quantity + proceeds
+                    self.db.adjust_holding_quantity(cash_holding.id, new_cash_amount)
+                    logger.info(f"已將期權平倉收益 {proceeds:.2f} {closed_option.currency} 加入現金，現金餘額: {new_cash_amount:.2f}")
+                else:
+                    # Create new cash holding
+                    self.db.add_holding(
+                        portfolio_id=closed_option.portfolio_id,
+                        symbol=cash_symbol,
+                        asset_type="現金",
+                        quantity=proceeds,
+                        purchase_price=1.0,
+                        purchase_date=datetime.utcnow(),
+                        current_price=1.0,
+                        market=closed_option.market,
+                        currency=closed_option.currency,
+                        notes=f"平倉{closed_option.symbol}期權收益"
+                    )
+                    logger.info(f"已創建現金持倉並加入期權平倉收益: {proceeds:.2f} {closed_option.currency}")
+                
+                logger.info(f"已平倉選擇權: {closed_option.symbol} {closed_option.option_type} {closed_option.strike}")
+                return self._calculate_option_performance(closed_option)
             return None
         except Exception as e:
             logger.error(f"平倉選擇權時出錯: {e}")

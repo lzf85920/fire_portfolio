@@ -107,15 +107,22 @@ class ChartsRenderer:
                 ("30天", 30, "30d"),
                 ("半年", 182, "6mo"),
                 ("近一年", days_this_year, "ytd"),
-                ("1年", 365, "1y"),
             ]
             if "trend_window" not in st.session_state:
                 st.session_state.trend_window = "半年"
-            selected_window = next((item for item in window_options if item[0] == st.session_state.trend_window), window_options[2])
-            selected_label, selected_days, selected_period = selected_window
-
-            end_date = datetime.today()
-            start_date = end_date - timedelta(days=selected_days)
+            
+            # Handle custom date range
+            if st.session_state.trend_window == "custom":
+                start_date = st.session_state.get("custom_start", datetime.now() - timedelta(days=365))
+                end_date = st.session_state.get("custom_end", datetime.now())
+                selected_label = f"自訂區間 ({start_date.strftime('%Y-%m-%d')} 至 {end_date.strftime('%Y-%m-%d')})"
+                selected_days = (end_date - start_date).days
+                selected_period = "custom"
+            else:
+                selected_window = next((item for item in window_options if item[0] == st.session_state.trend_window), window_options[2])
+                selected_label, selected_days, selected_period = selected_window
+                end_date = datetime.today()
+                start_date = end_date - timedelta(days=selected_days)
 
             # Get performance history
             performance_history = self.pm.get_performance_history(portfolio_id)
@@ -186,8 +193,13 @@ class ChartsRenderer:
                 )
 
             # Benchmark data fetcher
-            def build_benchmark_series(symbol: str, period: str, target_dates: List[datetime], aggregate_long_periods: bool = False):
-                df = DataFetcher.get_index_historical(symbol, period=period)
+            def build_benchmark_series(symbol: str, period: str, target_dates: List[datetime], aggregate_long_periods: bool = False, start_date: datetime = None, end_date: datetime = None):
+                # For custom period, use start and end dates
+                if period == "custom" and start_date and end_date:
+                    df = DataFetcher.get_index_historical_custom(symbol, start_date, end_date)
+                else:
+                    df = DataFetcher.get_index_historical(symbol, period=period)
+                
                 if df is None or df.empty:
                     base_values = [100 + i * 0.12 for i in range(len(target_dates))]
                     if aggregate_long_periods:
@@ -226,14 +238,20 @@ class ChartsRenderer:
             # Use same dates for benchmark lines where possible
             portfolio_indexed = normalize(values)
             aggregate_needed = selected_days > 30
+            
+            # Prepare benchmark parameters
+            benchmark_kwargs = {}
+            if selected_period == "custom":
+                benchmark_kwargs = {"start_date": start_date, "end_date": end_date}
+            
             if aggregate_needed:
                 # For aggregated data, we need to adjust benchmark dates to match
                 aggregated_dates = dates
-                us_indexed = build_benchmark_series("^GSPC", selected_period, aggregated_dates, aggregate_needed)
-                tw_indexed = build_benchmark_series("^TWII", selected_period, aggregated_dates, aggregate_needed)
+                us_indexed = build_benchmark_series("^GSPC", selected_period, aggregated_dates, aggregate_needed, **benchmark_kwargs)
+                tw_indexed = build_benchmark_series("^TWII", selected_period, aggregated_dates, aggregate_needed, **benchmark_kwargs)
             else:
-                us_indexed = build_benchmark_series("^GSPC", selected_period, dates, aggregate_needed)
-                tw_indexed = build_benchmark_series("^TWII", selected_period, dates, aggregate_needed)
+                us_indexed = build_benchmark_series("^GSPC", selected_period, dates, aggregate_needed, **benchmark_kwargs)
+                tw_indexed = build_benchmark_series("^TWII", selected_period, dates, aggregate_needed, **benchmark_kwargs)
 
             # Create figure
             fig = go.Figure()
@@ -282,6 +300,31 @@ class ChartsRenderer:
                     button_clicked = True
             if button_clicked:
                 st.rerun()
+            
+            # Custom date range selector
+            with st.expander("📅 自訂時間區間", expanded=False):
+                col1, col2 = st.columns(2)
+                with col1:
+                    start_date = st.date_input(
+                        "開始日期",
+                        value=datetime.now() - timedelta(days=365),
+                        key="custom_start_date"
+                    )
+                with col2:
+                    end_date = st.date_input(
+                        "結束日期", 
+                        value=datetime.now(),
+                        key="custom_end_date"
+                    )
+                
+                if st.button("套用自訂區間", use_container_width=True):
+                    if start_date >= end_date:
+                        st.error("開始日期必須早於結束日期")
+                    else:
+                        st.session_state.trend_window = "custom"
+                        st.session_state.custom_start = start_date
+                        st.session_state.custom_end = end_date
+                        st.rerun()
         except Exception as e:
             st.error(f"Error rendering trend chart: {str(e)}")
             import logging

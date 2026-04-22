@@ -17,15 +17,25 @@ class FormsRenderer:
         """Render form to add new holding"""
         if "show_add_form" not in st.session_state:
             st.session_state.show_add_form = False
+        
+        if "transaction_type" not in st.session_state:
+            st.session_state.transaction_type = "📊 購買持倉"
 
         if st.session_state.show_add_form:
             st.subheader("➕ 添加新持倉")
+            
+            # Transaction type selection - outside form for immediate update
+            st.session_state.transaction_type = st.radio(
+                "交易類型", 
+                ["📊 購買持倉", "💰 現金入金", "📈 期權合約"], 
+                horizontal=True,
+                index=["📊 購買持倉", "💰 現金入金", "📈 期權合約"].index(st.session_state.transaction_type)
+            )
+            is_deposit = "現金入金" in st.session_state.transaction_type
+            is_option = "期權合約" in st.session_state.transaction_type
 
             with st.form("add_holding_form"):
-                # Transaction type selection
-                transaction_type = st.radio("交易類型", ["📊 購買持倉", "💰 現金入金", "📈 期權合約"], horizontal=True)
-                is_deposit = "現金入金" in transaction_type
-                is_option = "期權合約" in transaction_type
+                # Use the transaction type from session state instead of form radio
 
                 # Market selection (only for positions and options)
                 if not is_deposit:
@@ -396,6 +406,15 @@ class FormsRenderer:
                     )
                 else:
                     adjust_quantity = selected_item.quantity
+                
+                # Add sell price input for stock holdings
+                sell_price = st.number_input(
+                    "賣出價格 ($/股)",
+                    min_value=0.0,
+                    step=0.01,
+                    value=selected_item.current_price,
+                    key="sell_price_input"
+                )
             else:  # option
                 if action == "平倉":
                     adjust_quantity = st.number_input(
@@ -406,19 +425,23 @@ class FormsRenderer:
                     )
                 else:
                     adjust_quantity = 0  # Not used for expire action
+                sell_price = None  # Not used for options
 
         if st.button("執行調整", use_container_width=True):
             if item_type == 'holding':
-                if adjust_quantity > 0:
+                if adjust_quantity > 0 and sell_price > 0:
                     st.session_state.confirm_adjust = {
                         'item_type': 'holding',
                         'item': selected_item,
                         'adjust_quantity': adjust_quantity,
-                        'action': action
+                        'action': action,
+                        'sell_price': sell_price
                     }
                     st.rerun()
-                else:
+                elif adjust_quantity <= 0:
                     st.warning("請輸入有效的調整數量")
+                else:
+                    st.warning("請輸入有效的賣出價格")
             else:  # option
                 if action == "平倉":
                     if adjust_quantity >= 0:
@@ -451,7 +474,8 @@ class FormsRenderer:
                 st.subheader("🔍 確認調整持倉")
                 currency = getattr(item, 'currency', 'USD')
                 adjust_quantity = data['adjust_quantity']
-                current_value = adjust_quantity * item.current_price
+                sell_price = data.get('sell_price', item.current_price)
+                current_value = adjust_quantity * sell_price
                 cost_sold = adjust_quantity * item.purchase_price
                 realized_pl = current_value - cost_sold
 
@@ -461,7 +485,7 @@ class FormsRenderer:
                     st.write(f"**操作:** {action}")
                     st.write(f"**調整數量:** {adjust_quantity}")
                 with col2:
-                    st.write(f"**現價:** {format_currency(item.current_price, currency)}")
+                    st.write(f"**賣出價格:** {format_currency(sell_price, currency)}")
                     st.write(f"**預計賣出價值:** {format_currency(current_value, currency)}")
                     st.write(f"**預計已實現損益:** {format_currency(realized_pl, currency)}")
             else:  # option
@@ -501,7 +525,8 @@ class FormsRenderer:
                                 holding_obj = next((h for h in holdings_db if h.symbol == item.symbol), None)
 
                                 if holding_obj:
-                                    self.pm.sell_position(st.session_state.portfolio_id, holding_obj.id, data['adjust_quantity'])
+                                    sell_price = data.get('sell_price', None)
+                                    self.pm.sell_position(st.session_state.portfolio_id, holding_obj.id, data['adjust_quantity'], sell_price=sell_price)
                                     st.success(f"已調整 {item.symbol}!")
                             else:  # option
                                 if action == "平倉":

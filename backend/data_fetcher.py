@@ -110,6 +110,20 @@ class DataFetcher:
             return pd.DataFrame()
     
     @staticmethod
+    def get_index_historical_custom(index_symbol: str, start_date: datetime, end_date: datetime) -> pd.DataFrame:
+        """Get index historical data for custom date range"""
+        try:
+            ticker = yf.Ticker(index_symbol)
+            data = ticker.history(start=start_date, end=end_date)
+            if data.empty:
+                return pd.DataFrame()
+            data.columns = data.columns.str.lower()
+            return data
+        except Exception as e:
+            logger.error(f"取得指數 {index_symbol} 的自訂時間區間歷史數據時出錯: {e}")
+            return pd.DataFrame()
+    
+    @staticmethod
     def get_option_chain(symbol: str) -> pd.DataFrame:
         """Get available option expirations for a stock"""
         try:
